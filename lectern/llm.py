@@ -23,6 +23,20 @@ log = logging.getLogger("lectern.llm")
 # Anthropic recommends for that case, inside the same call.
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
+# Shared with chat. Diagrams are drawn in the app with Mermaid; these rules keep the syntax valid,
+# because an invalid diagram is shown as code instead of a picture.
+DIAGRAM_RULES = """Diagrams: when a picture explains something better than words (a process or algorithm, a \
+flow of data, an architecture, a hierarchy, a timeline, who-talks-to-whom), add a Mermaid diagram in \
+a ```mermaid code block. Rules, so it draws correctly:
+- Use only these kinds: `flowchart TD` (or `flowchart LR`), `sequenceDiagram`, `stateDiagram-v2`, \
+`classDiagram`, `mindmap`, `timeline`.
+- Put every flowchart node label in double quotes: A["Compute the gradient"] --> B["Update the weights"]. \
+Edge labels too: A -->|"if loss falls"| B. Never use double quotes inside a label; use single quotes.
+- Node ids are plain words without spaces (A, B, step1, encoder).
+- No LaTeX, Markdown or HTML inside diagrams: write x^2 or "theta" as plain text.
+- Keep each diagram small and readable: at most about 12 boxes. Split a bigger idea into two diagrams.
+- In a mindmap, indent children with two spaces per level and keep node texts short, without brackets."""
+
 SYSTEM = """You turn lecture and tutorial transcripts into study material for a learner.
 
 Rules:
@@ -35,7 +49,9 @@ and some words are misheard. Fix obvious mishearings silently (for example techn
 point to a moment, write the time in exactly that format, in square brackets, using a time that \
 appears in the transcript. These become links that jump to that moment in the video.
 - Format: Markdown. Math in LaTeX: $x^2$ inline, $$...$$ for display. Code in fenced code blocks \
-with a language. No HTML."""
+with a language. No HTML.
+
+""" + DIAGRAM_RULES
 
 SUMMARY_TASK = """Write a summary of this video.
 
@@ -52,14 +68,32 @@ The video's parts in order. One line per part: `- [mm:ss] Title of the part: one
 
 Keep it short: the whole summary should be readable in about two minutes."""
 
-NOTES_TASK = """Write detailed study notes for this video: notes a learner can study from instead of rewatching it.
+NOTES_TASK = """Write detailed study notes for this video: notes a learner can study from instead of rewatching it. \
+They should be well structured and easy to scan, not walls of text.
 
 Structure:
-- Split the notes into the video's parts, in order. Start each part with a level-2 heading that begins with the part's timestamp: `## [mm:ss] Title`. Use no other level-2 headings except the last one below.
-- Under each heading, explain the ideas clearly and completely, in your own well-organised words: definitions (term in **bold**), how things work and why, formulas, worked examples and code from the video, and common mistakes the speaker mentions. Use level-3 headings, bullets, tables and code blocks where they help. Add more timestamps in brackets for important moments inside a part.
-- Finish with `## Review questions`: 5 to 10 questions that check understanding. Write each as a numbered item with the question in **bold**, and its answer as a nested bullet under it that starts with "Answer:".
+- Start with one sentence saying what the video teaches, then a Mermaid `mindmap` of the video's main \
+topics (the root is the video's subject; one branch per part).
+- Split the notes into the video's parts, in order. Start each part with a level-2 heading that begins \
+with the part's timestamp: `## [mm:ss] Title`. Use no other level-2 headings except the last one below.
+- Inside each part, in this order and only where it fits the content:
+  - one or two sentences on what this part is about;
+  - the ideas as bullet points (nested bullets for details), with each **term in bold** where it is \
+defined, and how and why things work, not just what they are;
+  - a table whenever there is a comparison, a list of options, parameters, steps with inputs and \
+outputs, pros and cons, or before/after: tables make these much easier to study;
+  - a Mermaid diagram whenever there is a process, an algorithm, a flow of data, an architecture or a \
+hierarchy (usually one per part at most, only when it really helps);
+  - formulas (LaTeX), worked examples and code from the video;
+  - `> **Remember:**` a one- or two-line takeaway, and a `> **Common mistake:**` line when the speaker \
+mentions one.
+  Use level-3 headings to split a long part. Add timestamps in brackets for important moments inside a part.
+- Finish with `## Review questions`: 5 to 10 questions that check understanding. Write each as a \
+numbered item with the question in **bold**, and its answer as a nested bullet under it that starts \
+with "Answer:".
 
-Length: thorough but not padded. Cover everything the video teaches; skip greetings, sponsor messages and channel housekeeping."""
+Length: thorough but not padded. Cover everything the video teaches; skip greetings, sponsor messages \
+and channel housekeeping."""
 
 TRANSLATE_TASK = """Translate these subtitle lines into natural English. They are consecutive lines of one video, \
 numbered. Translate each line on its own, keeping the meaning of the whole passage in mind. Keep \

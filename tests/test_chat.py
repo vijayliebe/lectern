@@ -107,3 +107,10 @@ def test_chat_route(tmp_path, openrouter):
     evs = [json.loads(l[6:]) for l in r.text.splitlines() if l.startswith("data: ")]
     assert evs[0] == {"delta": "Answer [00:00]."} and evs[-1]["done"]
     assert c.post(f"/v1/videos/{vid}/chat", json={"messages": [{"role": "system", "content": "x"}]}, headers=KEY).status_code == 422
+
+
+def test_chat_uses_its_own_model_when_set(openrouter, monkeypatch):
+    monkeypatch.setattr(chat, "LLM_CHAT_MODEL", "google/gemini-3-flash")
+    sent = openrouter(or_events("ok"))
+    list(chat.stream(HINDI, [{"role": "user", "content": "q"}]))
+    assert sent[0]["model"] == "google/gemini-3-flash"

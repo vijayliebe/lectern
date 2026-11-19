@@ -49,6 +49,8 @@ LLM_PROVIDER = _provider
 LLM = bool(OPENROUTER_KEY if LLM_PROVIDER == "openrouter" else ANTHROPIC_KEY) and _bool("LECTERN_LLM", True)
 LLM_MODEL = os.environ.get("LECTERN_LLM_MODEL") or (
     "anthropic/claude-opus-5.5" if LLM_PROVIDER == "openrouter" else "claude-opus-5-5")
+# Chat can use its own (for example cheaper, faster) model; by default the same one.
+LLM_CHAT_MODEL = os.environ.get("LECTERN_LLM_CHAT_MODEL", "").strip() or LLM_MODEL
 OPENROUTER_URL = os.environ.get("LECTERN_OPENROUTER_URL", "https://openrouter.ai/api/v1").rstrip("/")
 LLM_EFFORT = os.environ.get("LECTERN_LLM_EFFORT", "medium")              # summary and study notes
 LLM_TRANSLATE_EFFORT = os.environ.get("LECTERN_LLM_TRANSLATE_EFFORT", "low")

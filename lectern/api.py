@@ -1,5 +1,6 @@
 """Lectern HTTP API. Every endpoint except /v1/health needs `Authorization: Bearer <LECTERN_API_KEY>`."""
 import hmac
+import time
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -10,7 +11,7 @@ from pydantic import BaseModel, Field
 
 from . import __version__, chat, db, llm, study, worker
 from .captions import Segment, to_vtt
-from .config import (API_KEY, DATA_DIR, LLM, LLM_MODEL, LLM_PROVIDER, MEDIA_ROOTS, WHISPER, WHISPER_MODEL, YOUTUBE,
+from .config import (API_KEY, DATA_DIR, LLM, LLM_CHAT_MODEL, LLM_MODEL, LLM_PROVIDER, MEDIA_ROOTS, WHISPER, WHISPER_MODEL, YOUTUBE,
                      YT_NAME_SEARCH)
 from .sources import youtube
 
@@ -30,7 +31,7 @@ async def lifespan(_app):
         study.start()
     log.info("lectern %s: media roots %s, youtube=%s (name search=%s), whisper=%s, llm=%s",
              __version__, [str(r) for r in MEDIA_ROOTS], YOUTUBE, YT_NAME_SEARCH, WHISPER and WHISPER_MODEL,
-             LLM and f"{LLM_MODEL} via {LLM_PROVIDER}")
+             LLM and f"{LLM_MODEL} (chat: {LLM_CHAT_MODEL}) via {LLM_PROVIDER}")
     yield
 
 
@@ -49,6 +50,7 @@ class VideoIn(BaseModel):
     duration_s: float | None = Field(default=None, ge=0)
     youtube_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{11}$")
     priority: int = Field(default=0, ge=0, le=1)  # 1 = someone is waiting for it (e.g. opened the video)
+    # (2 is set only by POST /v1/videos/{id}/now: someone asked for this one explicitly)
 
 
 def _check_path(raw: str) -> Path:
@@ -63,9 +65,26 @@ def _check_path(raw: str) -> Path:
     return p
 
 
+QUEUES = {"queued": ("queued", "fetching"), "whisper": ("whisper", "transcribing")}
+
+
+def _ahead(v: dict) -> int | None:
+    """How many videos will be handled before this one (including the one being worked on now)."""
+    if v["status"] not in QUEUES or v["next_try_at"]:
+        return None
+    waiting, working = QUEUES[v["status"]]
+    return db.one(f"""SELECT COUNT(*) n FROM video WHERE (status='{working}') OR (status='{waiting}'
+                      AND (next_try_at IS NULL OR next_try_at <= datetime('now'))
+                      AND (priority > ? OR (priority = ? AND id < ?)))""",
+                  (v["priority"], v["priority"], v["id"]))["n"]
+
+
 def _view(v: dict) -> dict:
-    return {k: v[k] for k in ("id", "path", "status", "progress", "source", "source_detail", "language",
-                              "error", "youtube_id", "next_try_at", "updated_at")}
+    out = {k: v[k] for k in ("id", "path", "status", "progress", "source", "source_detail", "language",
+                             "error", "youtube_id", "next_try_at", "updated_at")}
+    out["ahead"] = _ahead(v)
+    out["requested"] = v["priority"] >= 2
+    return out
 
 
 def _upsert(body: VideoIn) -> dict:
@@ -151,7 +170,7 @@ def get_transcript(video_id: int, format: str = "json", lang: str | None = None)
 
 
 @app.post("/v1/videos/{video_id}/retry", dependencies=[Depends(auth)])
-def retry(video_id: int, whisper: bool = False):
+def retry(video_id: int, whisper: bool = False, priority: int = 1):
     """Start over. With ?whisper=true, skip subtitles/YouTube and run speech-to-text."""
     v = _get(video_id)
     if v["status"] in ("fetching", "transcribing"):
@@ -162,11 +181,26 @@ def retry(video_id: int, whisper: bool = False):
         c.execute("DELETE FROM segment WHERE video_id=?", (video_id,))
         c.execute("DELETE FROM artifact WHERE video_id=?", (video_id,))
         c.execute("""UPDATE video SET status=?, source=NULL, source_detail=NULL, language=NULL, error=NULL,
-                     progress=NULL, next_try_at=NULL, priority=1,
+                     progress=NULL, next_try_at=NULL, priority=?,
                      youtube_id=CASE WHEN youtube_how='given' THEN youtube_id END,
                      youtube_how=CASE WHEN youtube_how='given' THEN youtube_how END WHERE id=?""",
-                  ("whisper" if whisper else "queued", video_id))
+                  ("whisper" if whisper else "queued", min(max(priority, 0), 2), video_id))
     (worker.wake_whisper if whisper else worker.wake_fetch).set()
+    return _view(_get(video_id))
+
+
+@app.post("/v1/videos/{video_id}/now", dependencies=[Depends(auth)])
+def now(video_id: int):
+    """Someone wants this transcript now: put it ahead of everything else in its queue. A video that
+    failed is tried again. It doesn't skip a pause YouTube asked for (use retry?whisper=true for that)."""
+    v = _get(video_id)
+    if v["status"] == "failed":
+        return retry(video_id, priority=2)
+    if v["status"] in ("queued", "whisper"):
+        clear_wait = v["next_try_at"] and youtube.blocked_until() <= time.time()  # was waiting for the network
+        with db.tx() as c:
+            c.execute(f"UPDATE video SET priority=2{', next_try_at=NULL' if clear_wait else ''} WHERE id=?", (video_id,))
+        (worker.wake_fetch if v["status"] == "queued" else worker.wake_whisper).set()
     return _view(_get(video_id))
 
 
@@ -178,7 +212,7 @@ def stats():
     return {"version": __version__, "counts": counts, "sources": sources, "transcribing": current,
             "youtube": {"enabled": YOUTUBE, "name_search": YT_NAME_SEARCH, **youtube.state()},
             "whisper": {"enabled": WHISPER, "model": WHISPER_MODEL},
-            "llm": {"enabled": LLM, "provider": LLM_PROVIDER, "model": LLM_MODEL, **(study.usage() if LLM else {})}}
+            "llm": {"enabled": LLM, "provider": LLM_PROVIDER, "model": LLM_MODEL, "chat_model": LLM_CHAT_MODEL, **(study.usage() if LLM else {})}}
 
 
 class ChatMessage(BaseModel):

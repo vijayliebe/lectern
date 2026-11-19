@@ -14,7 +14,7 @@ Transcripts are stored as timed segments with the detected language, and served 
 
 With an LLM API key (OpenRouter by default, or Anthropic directly) it also writes, from the transcript and always in English, whatever the transcript's language:
 - a **summary**: a few sentences, the key points and an outline, each pointing to a `[mm:ss]` moment;
-- **study notes**: the video part by part (`## [mm:ss] Title`), with explanations, definitions, formulas, examples and review questions;
+- **study notes**: a Mermaid mind map of the topics, then the video part by part (`## [mm:ss] Title`) with bullet points, tables, Mermaid diagrams (flowcharts, sequence diagrams, ...), formulas, examples, "Remember" and "Common mistake" boxes, and review questions. The prompt includes rules that keep the Mermaid syntax valid; an app that shows the notes should render ```mermaid blocks;
 - an **English translation** of a non-English transcript, line by line with the original timing, so it works as subtitles.
 
 These are made only when asked for, once per video, and kept until the transcript changes.
@@ -37,6 +37,7 @@ Every endpoint except `/v1/health` needs `Authorization: Bearer <LECTERN_API_KEY
 | `POST` | `/v1/videos/batch` | The same for a list (up to 5000). |
 | `GET` | `/v1/videos/{id}` | Status: `queued`, `fetching`, `whisper` (waiting for speech-to-text), `transcribing` (with `progress`), `done`, `failed`. |
 | `GET` | `/v1/videos/{id}/transcript` | Segments as JSON; `?format=vtt` for WebVTT. `409` until it's done. |
+| `POST` | `/v1/videos/{id}/now` | Someone wants this one now: it goes ahead of everything else in its queue (a failed one is tried again). `GET /v1/videos/{id}` shows `ahead`, the number of videos before it. |
 | `POST` | `/v1/videos/{id}/retry` | Start over; `?whisper=true` goes straight to speech-to-text. |
 | `GET` | `/v1/videos/{id}/transcript?lang=en` | The English translation, once made (`409` before). |
 | `POST` | `/v1/videos/{id}/summary` | Ask for the summary (`notes`, `translation` work the same way). Made in the background; `?again=true` makes it again. |
@@ -68,7 +69,8 @@ Paths must be inside `LECTERN_MEDIA_ROOTS`; anything else is refused, including 
 | `ANTHROPIC_API_KEY` | — | Use the Anthropic API directly instead (used when no OpenRouter key is set). |
 | `LECTERN_LLM_PROVIDER` | automatic | `openrouter` or `anthropic`, to choose when both keys are set. |
 | `LECTERN_LLM` | `1` | `0` turns them off even with a key. |
-| `LECTERN_LLM_MODEL` | `anthropic/claude-opus-5.5` on OpenRouter, `claude-opus-5-5` on Anthropic | Any model id the provider offers. |
+| `LECTERN_LLM_MODEL` | `anthropic/claude-opus-5.5` on OpenRouter, `claude-opus-5-5` on Anthropic | Model for summaries, study notes and translations: any model id the provider offers (on OpenRouter, see openrouter.ai/models). |
+| `LECTERN_LLM_CHAT_MODEL` | same as `LECTERN_LLM_MODEL` | Model for chat answers, if you want a different (e.g. faster, cheaper) one. |
 | `LECTERN_LLM_EFFORT` | `medium` | How hard the model thinks for summaries and notes: `low`, `medium`, `high`. |
 | `LECTERN_LLM_TRANSLATE_EFFORT` | `low` | The same, for translations. |
 | `LECTERN_LLM_CHAT_EFFORT` | `low` | The same, for chat answers (low = quick). |

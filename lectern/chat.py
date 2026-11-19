@@ -14,7 +14,7 @@ from collections.abc import Iterator
 import anthropic
 
 from . import llm
-from .config import LLM_CHAT_EFFORT, LLM_MODEL, LLM_PROVIDER
+from .config import LLM_CHAT_EFFORT, LLM_CHAT_MODEL, LLM_PROVIDER
 
 log = logging.getLogger("lectern.chat")
 
@@ -34,7 +34,10 @@ general knowledge, but say clearly that this part is not from the video.
 obvious mishearings.
 - Be clear and to the point: usually a short paragraph or a few bullets. Go longer only when the \
 learner asks for detail, a step-by-step explanation, practice questions or code.
-- Format: Markdown. Math in LaTeX: $x^2$ inline, $$...$$ for display. Code in fenced code blocks. No HTML."""
+- Format: Markdown, with bullets and tables where they make the answer easier to read. Math in \
+LaTeX: $x^2$ inline, $$...$$ for display. Code in fenced code blocks. No HTML.
+
+""" + llm.DIAGRAM_RULES
 
 MAX_TURNS = 40          # messages kept from the conversation (older ones are dropped)
 MAX_MESSAGE_CHARS = 8000
@@ -60,11 +63,11 @@ def build_messages(transcript: str, conversation: list[dict], at: float | None) 
 # Each stream yields ("delta", text) pieces, then exactly one ("done", Result) or raises LLMError.
 
 def _openrouter(messages: list[dict]) -> Iterator[tuple[str, object]]:
-    body = {"model": LLM_MODEL, "messages": [{"role": "system", "content": SYSTEM}] + messages,
+    body = {"model": LLM_CHAT_MODEL, "messages": [{"role": "system", "content": SYSTEM}] + messages,
             "max_completion_tokens": 16000, "reasoning": {"effort": LLM_CHAT_EFFORT, "exclude": True},
             "stream": True, "stream_options": {"include_usage": True}}
     for attempt in range(3):
-        started, finish, model, usage, parts = False, None, LLM_MODEL, {}, []
+        started, finish, model, usage, parts = False, None, LLM_CHAT_MODEL, {}, []
         try:
             for ev in llm._openrouter_stream(body):
                 if "error" in ev:
@@ -102,7 +105,7 @@ def _anthropic(messages: list[dict]) -> Iterator[tuple[str, object]]:
     parts = []
     try:
         with llm.client().beta.messages.stream(
-            model=LLM_MODEL, max_tokens=16000, system=SYSTEM, messages=messages,
+            model=LLM_CHAT_MODEL, max_tokens=16000, system=SYSTEM, messages=messages,
             output_config={"effort": LLM_CHAT_EFFORT},
             betas=[llm.FALLBACK_BETA], fallbacks="default",
         ) as stream:
