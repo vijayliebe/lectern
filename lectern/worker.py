@@ -35,6 +35,7 @@ def _set(vid: int, **cols) -> None:
 def save(vid: int, segs: list[Segment], language: str | None, source: str, detail: str) -> None:
     with db.tx() as c:
         c.execute("DELETE FROM segment WHERE video_id=?", (vid,))
+        c.execute("DELETE FROM artifact WHERE video_id=?", (vid,))  # made from the old transcript
         c.executemany("INSERT INTO segment (video_id, idx, start_s, end_s, text) VALUES (?,?,?,?,?)",
                       [(vid, i, s.start, s.end, s.text) for i, s in enumerate(segs)])
         c.execute("""UPDATE video SET status='done', source=?, source_detail=?, language=?, error=NULL,

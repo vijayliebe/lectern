@@ -43,6 +43,23 @@ MIGRATIONS = [
 
     CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     """,
+    # v2: things made from a transcript with an LLM. Deleted whenever the transcript changes.
+    """
+    CREATE TABLE artifact (
+        video_id       INTEGER NOT NULL REFERENCES video(id) ON DELETE CASCADE,
+        kind           TEXT NOT NULL,            -- summary | notes | translation
+        status         TEXT NOT NULL DEFAULT 'queued',   -- queued | working | done | failed
+        content        TEXT,                     -- Markdown, or JSON segments for a translation
+        model          TEXT,
+        input_tokens   INTEGER,
+        output_tokens  INTEGER,
+        error          TEXT,
+        requested_at   TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at     TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (video_id, kind)
+    );
+    CREATE INDEX artifact_status ON artifact(status, requested_at);
+    """,
 ]
 
 
@@ -82,6 +99,7 @@ def migrate() -> None:
     # a restart interrupts work in progress: put it back in the queue
     c.execute("UPDATE video SET status='queued' WHERE status='fetching'")
     c.execute("UPDATE video SET status='whisper', progress=NULL WHERE status='transcribing'")
+    c.execute("UPDATE artifact SET status='queued' WHERE status='working'")
 
 
 def one(sql: str, params=()) -> dict | None:

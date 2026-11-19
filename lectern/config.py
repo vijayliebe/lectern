@@ -37,3 +37,19 @@ WHISPER_COMPUTE = os.environ.get("LECTERN_WHISPER_COMPUTE", "int8")
 WHISPER_BEAM = int(_float("LECTERN_WHISPER_BEAM", 1))  # 1 = greedy: about twice as fast on a CPU
 
 SUBTITLE_EXTS = (".vtt", ".srt")
+
+# Summaries, study notes and English translation. On only when an API key is set.
+# Provider: OpenRouter by default (OPENROUTER_API_KEY), or Anthropic directly (ANTHROPIC_API_KEY).
+OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY", "").strip()
+ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+_provider = os.environ.get("LECTERN_LLM_PROVIDER", "").strip().lower()
+if _provider not in ("openrouter", "anthropic"):
+    _provider = "anthropic" if ANTHROPIC_KEY and not OPENROUTER_KEY else "openrouter"
+LLM_PROVIDER = _provider
+LLM = bool(OPENROUTER_KEY if LLM_PROVIDER == "openrouter" else ANTHROPIC_KEY) and _bool("LECTERN_LLM", True)
+LLM_MODEL = os.environ.get("LECTERN_LLM_MODEL") or (
+    "anthropic/claude-opus-5.5" if LLM_PROVIDER == "openrouter" else "claude-opus-5-5")
+OPENROUTER_URL = os.environ.get("LECTERN_OPENROUTER_URL", "https://openrouter.ai/api/v1").rstrip("/")
+LLM_EFFORT = os.environ.get("LECTERN_LLM_EFFORT", "medium")              # summary and study notes
+LLM_TRANSLATE_EFFORT = os.environ.get("LECTERN_LLM_TRANSLATE_EFFORT", "low")
+LLM_CHAT_EFFORT = os.environ.get("LECTERN_LLM_CHAT_EFFORT", "low")      # chat: quick answers

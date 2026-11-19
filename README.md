@@ -12,7 +12,20 @@ For each video it tries, in order:
 
 Transcripts are stored as timed segments with the detected language, and served as JSON or WebVTT.
 
-Coming next: English translation of non-English transcripts, summaries, detailed notes, and chat, using a cloud LLM.
+With an LLM API key (OpenRouter by default, or Anthropic directly) it also writes, from the transcript and always in English, whatever the transcript's language:
+- a **summary**: a few sentences, the key points and an outline, each pointing to a `[mm:ss]` moment;
+- **study notes**: the video part by part (`## [mm:ss] Title`), with explanations, definitions, formulas, examples and review questions;
+- an **English translation** of a non-English transcript, line by line with the original timing, so it works as subtitles.
+
+These are made only when asked for, once per video, and kept until the transcript changes.
+
+It can also **chat about a video**: the whole transcript goes into the prompt (cached, so follow-up questions are cheap), answers stream back and point to `[mm:ss]` moments. Answers are in English unless the learner writes in another language. Lectern keeps no chat history: the caller sends the conversation each time.
+
+### Other languages (for example Hindi)
+
+- **YouTube:** for a Hindi video Lectern takes the creator's Hindi captions, or else YouTube's own Hindi speech recognition (`hi-orig`), never a machine-translated track. If the creator uploaded English captions, those are used.
+- **Speech-to-text:** Whisper detects the language by itself. For Hindi, `LECTERN_WHISPER_MODEL=medium` or `large-v3-turbo` is much more accurate than `small`, at the cost of speed.
+- **Summary and study notes** are written in English from the original transcript; **translation** gives English subtitles with the original timing.
 
 ## API
 
@@ -25,7 +38,11 @@ Every endpoint except `/v1/health` needs `Authorization: Bearer <LECTERN_API_KEY
 | `GET` | `/v1/videos/{id}` | Status: `queued`, `fetching`, `whisper` (waiting for speech-to-text), `transcribing` (with `progress`), `done`, `failed`. |
 | `GET` | `/v1/videos/{id}/transcript` | Segments as JSON; `?format=vtt` for WebVTT. `409` until it's done. |
 | `POST` | `/v1/videos/{id}/retry` | Start over; `?whisper=true` goes straight to speech-to-text. |
-| `GET` | `/v1/stats` | Queue counts, sources, YouTube pause state. |
+| `GET` | `/v1/videos/{id}/transcript?lang=en` | The English translation, once made (`409` before). |
+| `POST` | `/v1/videos/{id}/summary` | Ask for the summary (`notes`, `translation` work the same way). Made in the background; `?again=true` makes it again. |
+| `GET` | `/v1/videos/{id}/summary` | Its status (`none`, `queued`, `working`, `done`, `failed`) and, when done, the Markdown, the model and the tokens used. |
+| `POST` | `/v1/videos/{id}/chat` | `{"messages": [{"role": "user", "content": "..."}, ...], "at": 125}` (the conversation so far, ending with the question; `at` = where the viewer is, optional). Streams server-sent events: `{"delta": "..."}` pieces, then `{"done": true, "model", "input_tokens", "output_tokens"}` or `{"error": "..."}`. |
+| `GET` | `/v1/stats` | Queue counts, sources, YouTube pause state, and summary jobs with total tokens used. |
 | `GET` | `/v1/health` | No key needed. |
 
 Paths must be inside `LECTERN_MEDIA_ROOTS`; anything else is refused, including `..` tricks.
@@ -47,7 +64,24 @@ Paths must be inside `LECTERN_MEDIA_ROOTS`; anything else is refused, including 
 | `LECTERN_WHISPER_THREADS` | `4` | CPU threads. |
 | `LECTERN_WHISPER_COMPUTE` | `int8` | |
 | `LECTERN_WHISPER_BEAM` | `1` | `1` is about twice as fast on a CPU; `5` is slightly more accurate. |
+| `OPENROUTER_API_KEY` | — | Turns on summaries, study notes and translation through [OpenRouter](https://openrouter.ai) (the default provider). Without a key they are off. |
+| `ANTHROPIC_API_KEY` | — | Use the Anthropic API directly instead (used when no OpenRouter key is set). |
+| `LECTERN_LLM_PROVIDER` | automatic | `openrouter` or `anthropic`, to choose when both keys are set. |
+| `LECTERN_LLM` | `1` | `0` turns them off even with a key. |
+| `LECTERN_LLM_MODEL` | `anthropic/claude-opus-5.5` on OpenRouter, `claude-opus-5-5` on Anthropic | Any model id the provider offers. |
+| `LECTERN_LLM_EFFORT` | `medium` | How hard the model thinks for summaries and notes: `low`, `medium`, `high`. |
+| `LECTERN_LLM_TRANSLATE_EFFORT` | `low` | The same, for translations. |
+| `LECTERN_LLM_CHAT_EFFORT` | `low` | The same, for chat answers (low = quick). |
 | `PUID` / `PGID` | `1000` | Owner of the files in `/data`. |
+
+### Cost and privacy of summaries
+
+- The transcript (not the video) is sent to the LLM provider, with the video's title. With OpenRouter, it passes them on to the company that runs the chosen model. Nothing is sent until someone asks for a summary, notes or a translation.
+- With Claude Opus 5.5 ($4 per million input tokens, $20 per million output tokens), a 1-hour lecture's transcript is roughly 15,000 tokens: a summary costs about 10 cents, study notes about 15 to 25 cents, and a translation about 30 to 40 cents (its output is as long as the transcript). Each is made once per video. The summary and the notes share the transcript through prompt caching, which makes the second one cheaper.
+- Chat: each question sends the transcript and the conversation. With Claude Opus 5.5 and a 1-hour lecture, the first question costs about 8 cents (it puts the transcript in the prompt cache) and follow-ups within 5 minutes about 1 to 2 cents each; after a longer pause the next question pays for the cache again.
+- `/v1/stats` shows the tokens used so far for summaries, notes and translations.
+- With the Anthropic API directly, a declined request is retried on a fallback model Anthropic picks (server-side fallback). With OpenRouter, failures are retried with back-off. Either way, if it still fails the job shows the reason.
+- Prompts are the same for every provider. Cheaper models (for example `anthropic/claude-sonnet-5.5`, half the price) work too; quality of the notes is best with Opus.
 
 ## Run it
 
